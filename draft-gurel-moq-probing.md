@@ -41,9 +41,10 @@ normative:
   MoQTransport: I-D.ietf-moq-transport
   LOC: I-D.ietf-moq-loc
 
+  CommonCatalogFormat: I-D.ietf-moq-catalogformat
+
 informative:
   TrackSwitching: I-D.gurel-moq-track-switching
-  CommonCatalogFormat: I-D.ietf-moq-catalogformat
 
 --- abstract
 
@@ -284,12 +285,13 @@ b = r * d / 8000                    (bytes, with d in milliseconds)
 ~~~
 {: #probe-relations title="Relations between probe parameters."}
 
-The relay chooses defaults for the parameters a subscriber omits. This
-document RECOMMENDS a default object rate (DEFAULT_F) of 50 objects per
-second, that is, one object every 20 ms, and a default greedy object
-size (DEFAULT_GREEDY_S) of 16384 bytes. The default key multiplier is 1.
-When g is absent, the whole probe is one group. A relay MAY advertise
-its defaults in the probe catalog.
+The defaults for parameters a subscriber omits are fixed by this
+document, so that the subscriber can resolve any Dynamic Probe Name
+itself and get the same result as the relay. The default object rate
+(DEFAULT_F) is 50 objects per second, that is, one object every 20 ms.
+The default greedy object size (DEFAULT_GREEDY_S) is 16384 bytes. The
+default key multiplier is 1.
+When g is absent, the whole probe is one group.
 
 The resolution procedure is shown below. Divisions are real-valued
 unless floor() is applied. MAX_BYTES and MAX_DURATION are the relay's
@@ -345,7 +347,7 @@ resolve(p):             // p: parsed keys, absent keys are null
 {: #probe-resolve title="Resolving probe parameters."}
 
 The following table resolves the examples from {{grammar}} with the
-recommended defaults.
+defaults.
 
 | Probe Name | Shape | Resolved values |
 |:-----------|:------|:----------------|
@@ -424,10 +426,9 @@ with smaller values.
 
 A relay that does not implement this specification also responds to a
 SUBSCRIBE for the `.probe` namespace with DOES_NOT_EXIST, or forwards it
-to a publisher that does the same. To tell "probing not supported" apart
-from "this probe is not acceptable", a subscriber can subscribe to the
-catalog track ({{catalog}}): if that also fails with DOES_NOT_EXIST, the
-relay does not support probing.
+to a publisher that does the same. Subscribers therefore use the probe
+catalog to discover support ({{catalog}}), not the result of a probe
+request.
 
 # Delivering a Probe {#delivery}
 
@@ -498,48 +499,94 @@ Probe objects carry no other per-object fields:
   Object i is Group floor(i / g), Object ID i mod g ({{resolve}}).
   A gap in Locations shows objects that were not delivered.
 
-* The rate and the number of objects follow from the Probe Name and the
-  relay defaults, which the receiver can resolve itself with the
-  procedure in {{resolve}} and the probe catalog ({{catalog}}).
+* The rate and the number of objects follow from the Probe Name, which
+  the receiver can resolve itself with the procedure and the fixed
+  defaults in {{resolve}}. For a Preset Name, the receiver resolves the
+  Dynamic Probe Name that the catalog gives for it ({{catalog}}).
 
 * The end of the probe is signaled by PUBLISH_DONE.
 
 # Probe Catalog {#catalog}
 
-A relay that implements this specification SHOULD serve a catalog track
-named `catalog` in the `.probe` namespace. The catalog is a JSON
-{{!RFC8259}} object that lists presets and, optionally, the relay's
-defaults and limits. It is a convenience for subscribers: Dynamic Probe
-Names work without it.
+A relay that implements this specification MUST serve a catalog track
+named `catalog` in the `.probe` namespace. The catalog uses the Common
+Catalog Format {{CommonCatalogFormat}}.
+
+## Catalog as Proof of Support
+
+A subscriber learns whether a relay supports probing by subscribing to
+the `.probe` catalog. If the subscription succeeds, the relay supports
+this specification. If it fails with DOES_NOT_EXIST, the relay does not,
+and the subscriber does not send probe requests to it. A rejected probe
+request alone does not tell the two cases apart (see {{validation}}).
+
+## Catalog Contents
+
+The catalog lists the relay's presets as tracks. For each preset, the
+catalog gives:
+
+* `name`: the Preset Name, which is the Track Name to subscribe to;
+
+* `selectionParams`: the `bitrate` (r) and, for a paced probe with an
+  object rate, the `framerate` (f), so that subscribers can select a
+  preset the same way they select media tracks; and
+
+* `probeName`: the Dynamic Probe Name that the preset stands for, which
+  lets the receiver resolve the preset with the procedure in
+  {{resolve}}.
+
+The common track fields set the namespace to `.probe` and the packaging
+to `loc` ({{payload}}). A catalog with no presets has an empty `tracks`
+array; it still proves support for Dynamic Probe Names.
 
 ~~~ json
 {
   "version": 1,
-  "presets": {
-    "sd-check": "d1000-f30-g30-r1000000",
-    "hd-check": "d1000-f30-g30-k5-r5000000",
-    "burst":    "b1000000"
+  "streamingFormat": "TBD",
+  "streamingFormatVersion": "1",
+  "commonTrackFields": {
+    "namespace": ".probe",
+    "packaging": "loc"
   },
-  "defaults": { "f": 50, "greedyObjectSize": 16384 },
-  "limits": {
-    "maxRate": 20000000,
-    "maxDuration": 5000,
-    "maxBytes": 5000000,
-    "maxObjectSize": 262144,
-    "maxConcurrent": 1
-  },
-  "keys": "bdfgkrs"
+  "tracks": [
+    {
+      "name": "sd-check",
+      "label": "1 Mbps video-like probe, 1 s",
+      "selectionParams": { "bitrate": 1000000, "framerate": 30 },
+      "probeName": "d1000-f30-g30-r1000000"
+    },
+    {
+      "name": "hd-check",
+      "label": "5 Mbps video-like probe with key frames, 1 s",
+      "selectionParams": { "bitrate": 5000000, "framerate": 30 },
+      "probeName": "d1000-f30-g30-k5-r5000000"
+    },
+    {
+      "name": "burst",
+      "label": "Greedy 1 MB burst",
+      "probeName": "b1000000"
+    }
+  ]
 }
 ~~~
 {: #catalog-example title="Probe catalog example."}
 
-The `defaults` member SHOULD be present, because receivers need the
-defaults to resolve a probe themselves ({{payload}}). The `presets`,
-`limits` and `keys` members are OPTIONAL. A relay MAY leave out `limits`
-to avoid revealing them. A
-subscriber subscribes to a preset by using its name as the Track Name,
-for example `hd-check`. When the catalog changes, the relay publishes
-the new catalog as a new group.
+The catalog MUST NOT carry the relay's limits. Session limits change
+with the state of the session ({{limits}}), so limits in a catalog would
+go stale, and a request that fits them can still be rejected. A
+subscriber learns about limits only from the result of a probe request.
+For the same reason, a preset in the catalog is not a promise: a relay
+SHOULD list only presets that fit its per-probe limits, but a request
+for a preset can still fail with EXCESSIVE_LOAD.
+
+When the presets change, the relay publishes the new catalog as a new
+group.
+
+TODO: The Common Catalog Format requires a registered `streamingFormat`
+value, and recommends a reverse-domain prefix for custom fields such as
+`probeName`. Discuss whether probes need a streaming format
+registration and a registered `probeName` field, or whether the probe
+catalog should be a profile of an existing streaming format.
 
 # Measuring with Probes {#measurement}
 
@@ -581,9 +628,9 @@ that consider this a concern MAY reduce the clock precision; receivers
 that use only differences between Timestamps are not affected by a
 constant offset.
 
-A relay MAY keep its limits out of Reason Phrases and the catalog, so
-that clients cannot use them to fingerprint the relay or tune requests
-to sit just below the limits.
+A relay MAY keep its limits out of Reason Phrases, so that clients
+cannot use them to fingerprint the relay or tune requests to sit just
+below the limits. The catalog does not carry limits ({{catalog}}).
 
 # IANA Considerations {#iana}
 
@@ -598,6 +645,9 @@ this document.
 
 * Whether the probe parameter keys need an IANA registry (see
   {{iana}}).
+
+* The `streamingFormat` value and the `probeName` field of the probe
+  catalog (see {{catalog}}).
 
 * Whether to keep the empty-namespace form of probe names, or to require
   the `.probe` namespace.
