@@ -295,15 +295,15 @@ object header ({{payload}}).
 
 ~~~ pseudocode
 resolve(p):             // p: parsed keys, absent keys are null
-  if p.d == null and p.b == null:  fail INVALID_PROBE
-  if p.f != null and p.s != null:  fail INVALID_PROBE
-  if p.k != null and p.g == null:  fail INVALID_PROBE  // needs g
+  if p.d == null and p.b == null:  fail DOES_NOT_EXIST
+  if p.f != null and p.s != null:  fail DOES_NOT_EXIST
+  if p.k != null and p.g == null:  fail DOES_NOT_EXIST  // needs g
   k = p.k or 1
   g = p.g                 // null: the whole probe is one group
   ratio = (g != null) ? (k + g - 1) / g : 1
 
   if p.r == null:                  // greedy probe
-    if p.f != null:  fail INVALID_PROBE  // greedy is not paced
+    if p.f != null:  fail DOES_NOT_EXIST  // greedy is not paced
     s = p.s or DEFAULT_GREEDY_S
     b = p.b or MAX_BYTES           // only d: send for d ms
     d = p.d or MAX_DURATION        // only b: send b bytes
@@ -327,9 +327,11 @@ resolve(p):             // p: parsed keys, absent keys are null
       b = p.b;  d = 8000 * b / r
     schedule = object i is released at t0 + i / f
 
-  if s < HEADER_SIZE:  fail INVALID_PROBE
-  check s, k * s, r, f, b, d against relay limits
-                       else fail PROBE_LIMIT_EXCEEDED
+  if s < HEADER_SIZE:  fail DOES_NOT_EXIST
+  check s, k * s, r, f, b, d against per-probe limits
+                       else fail DOES_NOT_EXIST
+  check concurrent probes and session byte budget
+                       else fail EXCESSIVE_LOAD
 
   // Object i (i = 0, 1, ...) is in Group floor(i / g) (Group 0
   // if g is null), with Object ID i mod g (i if g is null). Its
@@ -356,7 +358,7 @@ recommended defaults.
 ## Validation Rules {#checks}
 
 A relay validates a probe request before it sends SUBSCRIBE_OK. The
-relay MUST reject the request with error code INVALID_PROBE if:
+relay MUST reject the request with error code DOES_NOT_EXIST if:
 
 * the Probe Name matches neither the grammar in {{grammar}} nor a known
   Preset Name;
@@ -379,25 +381,52 @@ A relay MUST enforce limits on the resources a probe can use. At a
 minimum, a relay MUST limit the rate, the duration, the total bytes and
 the object size of a single probe, the number of probes running at the
 same time on a session, and the total probe bytes per session over a
-period of time. The relay MUST reject a request that exceeds any limit
-with error code PROBE_LIMIT_EXCEEDED. The relay MUST NOT silently clamp
-the parameters, because a subscriber that measures a different probe
-from the one it asked for draws the wrong conclusion.
+period of time.
+
+A per-probe limit (rate, duration, total bytes or object size) that is
+exceeded can never be met at this relay, so the relay MUST reject the
+request with error code DOES_NOT_EXIST and a Retry Interval of 0. From
+the subscriber's point of view, no probe track with that name exists at
+this relay.
+
+A session limit (concurrent probes or the per-session byte budget) that
+is exceeded can be met later, so the relay MUST reject the request with
+error code EXCESSIVE_LOAD and SHOULD set the Retry Interval to the time
+after which the request is expected to succeed.
+
+The relay MUST NOT silently clamp the parameters, because a subscriber
+that measures a different probe from the one it asked for draws the
+wrong conclusion.
 
 ## Error Reporting
 
-The relay rejects a probe with REQUEST_ERROR {{MoQTransport}}, using the
-error codes in {{iana-errors}}. The Reason Phrase MAY name the field and
-the limit at fault, for example "r exceeds 20000000". A relay that does
-not want to reveal its limits MAY send a generic Reason Phrase, for
-example "probe rejected, use a preset". A subscriber that receives
-PROBE_LIMIT_EXCEEDED can then switch to a Preset Name from the catalog,
-or retry with smaller values.
+This document defines no new error codes. A relay rejects a probe with
+REQUEST_ERROR {{MoQTransport}}, using the existing error codes as
+follows:
 
-A relay that does not implement this specification responds to a
+| Condition | Error Code | Retry Interval |
+|:----------|:-----------|:---------------|
+| Invalid Probe Name or parameters ({{checks}}) | DOES_NOT_EXIST | 0 |
+| Per-probe limit exceeded | DOES_NOT_EXIST | 0 |
+| Session limit exceeded | EXCESSIVE_LOAD | time until the request can succeed |
+| Session not allowed to use probes | UNAUTHORIZED | 0 |
+| FETCH for a probe track | NOT_SUPPORTED | 0 |
+{: #probe-errors title="Error codes for probe requests."}
+
+Because DOES_NOT_EXIST covers several conditions, the Reason Phrase
+carries the detail. It MAY name the field and the limit at fault, for
+example "r exceeds 20000000". A relay that does not want to reveal its
+limits MAY send a generic Reason Phrase instead, for example "probe
+rejected, use a preset". A subscriber that receives DOES_NOT_EXIST for a
+Dynamic Probe Name can switch to a Preset Name from the catalog, or retry
+with smaller values.
+
+A relay that does not implement this specification also responds to a
 SUBSCRIBE for the `.probe` namespace with DOES_NOT_EXIST, or forwards it
-to a publisher that does the same. A subscriber therefore learns that
-probing is not supported on that relay.
+to a publisher that does the same. To tell "probing not supported" apart
+from "this probe is not acceptable", a subscriber can subscribe to the
+catalog track ({{catalog}}): if that also fails with DOES_NOT_EXIST, the
+relay does not support probing.
 
 # Delivering a Probe {#delivery}
 
@@ -408,7 +437,7 @@ aggregate two subscriptions to the same Probe Name into one generated
 track, MUST NOT cache probe objects, and MUST NOT serve them to another
 subscriber. Every probe starts at Group 0, Object 0, whatever the
 subscription filter. A relay responds to a FETCH for a probe track with
-REQUEST_ERROR and error code DOES_NOT_EXIST.
+REQUEST_ERROR and error code NOT_SUPPORTED.
 
 After SUBSCRIBE_OK, the relay sends the objects according to the
 resolved schedule. When the probe ends, it ends the subscription with
@@ -550,16 +579,8 @@ to sit just below the limits.
 
 # IANA Considerations {#iana}
 
-## MOQT Request Error Codes {#iana-errors}
-
-This document registers the following entries in the "MOQT REQUEST_ERROR
-Codes" registry established by {{MoQTransport}}.
-
-| Name | Code | Specification |
-|:-----|:----:|:--------------|
-| INVALID_PROBE | TBD1 | This document |
-| PROBE_LIMIT_EXCEEDED | TBD2 | This document |
-{: #iana-error-table title="REQUEST_ERROR codes."}
+This document does not register any MOQT error codes. It uses the
+existing REQUEST_ERROR codes as described in {{validation}}.
 
 ## MOQT Probe Parameter Keys {#iana-keys}
 
