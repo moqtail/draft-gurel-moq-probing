@@ -1,4 +1,4 @@
-name: "Update Editor's Copy"
+name: "Build Draft"
 
 on:
   push:
@@ -16,10 +16,10 @@ on:
 
 jobs:
   build:
-    name: "Update Editor's Copy"
+    name: "Build Draft"
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
     - name: "Checkout"
       uses: actions/checkout@v4
@@ -45,16 +45,19 @@ jobs:
       with:
         token: ${{ github.token }}
 
-    - name: "Update GitHub Pages"
-      uses: martinthomson/i-d-template@v1
-      if: ${{ github.event_name == 'push' }}
-      with:
-        make: gh-pages
-        token: ${{ github.token }}
+    - name: "Render PDF"
+      run: |
+        for f in draft-*.html; do
+          google-chrome --headless=new --no-sandbox --disable-gpu \
+            --no-pdf-header-footer \
+            --print-to-pdf="$PWD/${f%.html}.pdf" "file://$PWD/$f"
+        done
 
     - name: "Archive Built Drafts"
       uses: actions/upload-artifact@v4
       with:
+        name: draft
         path: |
           draft-*.html
           draft-*.txt
+          draft-*.pdf
