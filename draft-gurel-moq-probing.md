@@ -619,81 +619,28 @@ registered.
 
 # Probes Served by Publishers {#publisher}
 
-The rules in this document are written for relays, but any MOQT
-endpoint that acts as a publisher can serve probe tracks with the same
-logic: the same Probe Names ({{naming}}), parameter resolution
-({{resolve}}), validation and errors ({{validation}}), delivery
-({{delivery}}) and object format ({{payload}}).
+Any MOQT endpoint that acts as a publisher can serve probe tracks with
+the same logic as a relay: the same Probe Names, parameter resolution,
+validation, errors, delivery and object format. When a subscriber is
+connected directly to a publisher, the publisher answers the (`.session`,
+`.probe`) namespace like a relay ({{session-ns}}).
 
-## Direct Sessions
+A publisher MAY also offer probe tracks in its own namespace and list
+them in its catalog, so that subscribers can reach them through relays
+and measure the whole path from the publisher. A publisher MUST respond
+to a FETCH for such a track with REQUEST_ERROR and error code
+NOT_SUPPORTED.
 
-When a subscriber is connected directly to a publisher, with no relay in
-between, the publisher MAY answer requests for the (`.session`,
-`.probe`) namespace exactly as a relay does, including the probe
-catalog. This follows from {{session-ns}}: the session-scoped namespace
-is always answered by the peer, whichever role it has. Everything this
-document says about relays then applies to the publisher.
+TODO: Relays do not read catalogs, so a relay cannot tell a publisher
+probe track from a media track, and would cache and aggregate it like
+any other track. Considerations:
 
-## Probe Tracks in a Publisher's Namespace
+* Probe tracks must not be cached.
 
-A publisher MAY also offer probe tracks under its own namespace, so that
-subscribers can reach them through relays. Such a probe measures the
-whole path from the publisher to the subscriber, which is useful when
-the bottleneck may be upstream of the subscriber's relay.
+* Probe tracks must not be fetched.
 
-A publisher probe namespace is the publisher's namespace with one more
-Track Namespace Field, `.probe`, appended. For example, a publisher of
-the namespace (`live`, `show`) offers probe tracks in the namespace
-(`live`, `show`, `.probe`). The publisher serves a catalog track named
-`catalog` in that namespace, in the format of {{catalog}}; its tracks
-inherit the publisher probe namespace from the catalog track. Publisher
-probe tracks are not session-scoped: they travel through relays like
-other tracks of the publisher.
-The catalog lists the presets the publisher offers. A publisher MAY
-also accept Dynamic Probe Names in that namespace.
-
-A relay that implements this specification recognizes a publisher probe
-namespace by its last Track Namespace Field. For a probe track in such a
-namespace, the relay:
-
-* forwards each SUBSCRIBE upstream as a separate subscription and MUST
-  NOT aggregate it with other subscriptions to the same track;
-
-* MUST NOT cache the objects or serve them to another subscriber; and
-
-* MUST NOT answer the request itself from its own probe generator,
-  because the subscriber asked to measure the path to the publisher.
-
-## FETCH
-
-FETCH MUST NOT work for any probe track. A probe object is only useful
-while it is fresh: a cached object carries a Timestamp from an earlier
-send, so any measurement based on it is wrong. A publisher MUST respond
-to a FETCH for a probe track with REQUEST_ERROR and error code
-NOT_SUPPORTED, and a relay MUST NOT serve such a FETCH from its cache.
-
-## Caching and Aggregation by Other Relays
-
-TBD: A relay that does not implement this specification sees a
-publisher probe track as an ordinary track. It can aggregate
-subscriptions, so a second subscriber joins a probe that is already
-running, and it can cache probe objects and serve them to later
-subscribers or answer FETCH from its cache. In each case the measurement
-is wrong, and the subscriber cannot reliably tell. Open points:
-
-* Whether a subscriber can detect such a relay, for example by checking
-  that a probe starts at Group 0, Object 0 and that Timestamps are
-  recent.
-
-* Whether Probe Names should carry a per-request nonce key, so that
-  every request has a unique Full Track Name and cannot be aggregated
-  or served from a cache.
-
-* Whether a relay should signal to its downstream subscribers that it
-  forwards publisher probes correctly.
-
-* How a publisher limits the upstream load when many subscribers probe
-  through the same relays, since relays do not fan out probes.
+* These constraints can be put in track properties, so that relays can
+  apply them without access to the catalog.
 
 # Measuring with Probes {#measurement}
 
@@ -769,8 +716,8 @@ this document.
 * Probes delivered as datagrams, which would let a receiver measure loss
   directly.
 
-* Caching and aggregation of publisher probe tracks by relays that do
-  not implement this specification (see {{publisher}}).
+* How relays learn that a publisher probe track must not be cached or
+  fetched (see {{publisher}}).
 
 --- back
 
