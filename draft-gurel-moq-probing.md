@@ -535,14 +535,18 @@ catalog gives:
   lets the receiver resolve the preset with the procedure in
   {{resolve}}.
 
-The common track fields set the namespace to `.probe` and the packaging
-to `loc` ({{payload}}). A catalog with no presets has an empty `tracks`
+The `streamingFormat` field is set to the custom value `probe`, and
+`streamingFormatVersion` to `1`. The probe catalog is read only by
+subscribers that implement this specification, so a custom value is
+enough to identify it, and other subscribers never need to parse it.
+`probeName` is likewise a custom field. The common track fields set the
+namespace to `.probe` and the packaging to `loc` ({{payload}}). A catalog with no presets has an empty `tracks`
 array; it still proves support for Dynamic Probe Names.
 
 ~~~ json
 {
   "version": 1,
-  "streamingFormat": "TBD",
+  "streamingFormat": "probe",
   "streamingFormatVersion": "1",
   "commonTrackFields": {
     "namespace": ".probe",
@@ -582,11 +586,11 @@ for a preset can still fail with EXCESSIVE_LOAD.
 When the presets change, the relay publishes the new catalog as a new
 group.
 
-TODO: The Common Catalog Format requires a registered `streamingFormat`
-value, and recommends a reverse-domain prefix for custom fields such as
-`probeName`. Discuss whether probes need a streaming format
-registration and a registered `probeName` field, or whether the probe
-catalog should be a profile of an existing streaming format.
+TODO: The Common Catalog Format expects `streamingFormat` values to be
+registered, and recommends a reverse-domain prefix for custom fields
+such as `probeName`. Discuss whether the custom `probe` value and the
+unprefixed `probeName` field are acceptable, or whether they should be
+registered.
 
 # Measuring with Probes {#measurement}
 
@@ -646,8 +650,8 @@ this document.
 * Whether the probe parameter keys need an IANA registry (see
   {{iana}}).
 
-* The `streamingFormat` value and the `probeName` field of the probe
-  catalog (see {{catalog}}).
+* Whether the custom `probe` streaming format value and the
+  `probeName` catalog field should be registered (see {{catalog}}).
 
 * Whether to keep the empty-namespace form of probe names, or to require
   the `.probe` namespace.
