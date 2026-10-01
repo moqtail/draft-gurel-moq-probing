@@ -363,8 +363,8 @@ relay MUST reject the request with error code DOES_NOT_EXIST if:
 * the Probe Name matches neither the grammar in {{grammar}} nor a known
   Preset Name;
 
-* a key is not defined in {{probe-keys}} (or in the registry of
-  {{iana-keys}}), or a key appears more than once;
+* a key is not defined in {{probe-keys}}, or a key appears more than
+  once;
 
 * a value has a leading zero, does not fit in 62 bits, or is zero for
   any of r, d, b, f, s, g or k;
@@ -579,17 +579,17 @@ to sit just below the limits.
 
 # IANA Considerations {#iana}
 
-This document does not register any MOQT error codes. It uses the
-existing REQUEST_ERROR codes as described in {{validation}}.
+This document has no IANA actions. It uses the existing REQUEST_ERROR
+codes as described in {{validation}}.
 
-## MOQT Probe Parameter Keys {#iana-keys}
-
-This document establishes a new registry, "MOQT Probe Parameter Keys".
-Each entry has a key (a single lowercase ASCII letter), a name, a unit
-and a reference. New entries are added under the Specification Required
-policy {{!RFC8126}}. The initial entries are the keys in {{probe-keys}}.
+TODO: Discuss whether the probe parameter keys in {{probe-keys}} need an
+IANA registry, so that new keys can be added later without updating
+this document.
 
 # Open Issues
+
+* Whether the probe parameter keys need an IANA registry (see
+  {{iana}}).
 
 * Whether to keep the empty-namespace form of probe names, or to require
   the `.probe` namespace.
