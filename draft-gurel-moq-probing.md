@@ -98,10 +98,10 @@ name. Because the relay generates the data itself, a probe:
   bursts) or run as a greedy bulk transfer, depending on what the
   subscriber needs to learn; and
 
-* uses the Low Overhead Media Container (LOC) {{LOC}}, the same object
-  format as the media it stands in for, and carries a send timestamp on
-  every object, so the receiver can compute throughput, delay variation
-  and loss without clock synchronization.
+* uses an object layout similar to the Low Overhead Media Container
+  (LOC) {{LOC}}, so receivers can reuse their LOC parsing logic, and
+  carries a send timestamp on every object, so the receiver can compute
+  throughput, delay variation and loss without clock synchronization.
 
 The result of a probe is input to a switching decision, for example one
 made with the mechanism in {{TrackSwitching}}.
@@ -458,9 +458,11 @@ measure.
 
 ## Object Format {#payload}
 
-Probe objects use the Low Overhead Media Container (LOC) {{LOC}}, so
-that a probe looks to the network, the relay and the receiving
-application like the media track it stands in for.
+Probe objects are similar to objects in the Low Overhead Media
+Container (LOC) {{LOC}}: they use the same layout and the same
+properties, so developers can parse probe objects with the same logic
+they use for LOC media objects. Probe objects are not LOC media,
+however: their payload is padding, not an encoded audio or video frame.
 
 Each probe object carries the following LOC Public Properties in its
 MOQT Object Properties:
@@ -482,12 +484,13 @@ Video Frame Marking (0x09):
   to imitate the key frames of a video track. The relay MUST NOT include
   it otherwise.
 
-The LOC Payload of a probe object is padding: bytes that bring the
-payload to its resolved size (s, or k*s for the first object of a
-group). The relay SHOULD set them to zero, and receivers MUST ignore
-their values. A probe object does not contain media, so a probe track
-does not use LOC Private Properties, and a receiver MUST NOT pass a
-probe payload to a media decoder.
+The payload of a probe object takes the place of the LOC Payload, and
+consists of padding: bytes that bring the payload to its resolved size
+(s, or k*s for the first object of a group). The relay SHOULD set them
+to zero, and receivers MUST ignore their values. Probe objects carry no
+LOC Private Properties. Because the payload is not media, a receiver
+MUST NOT pass a probe payload to a media decoder, even if it parses
+probe objects with a LOC parser.
 
 Probe objects carry no other per-object fields:
 
