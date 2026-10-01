@@ -39,6 +39,7 @@ author:
 
 normative:
   MoQTransport: I-D.ietf-moq-transport
+  LOC: I-D.ietf-moq-loc
 
 informative:
   TrackSwitching: I-D.gurel-moq-track-switching
@@ -97,8 +98,10 @@ name. Because the relay generates the data itself, a probe:
   bursts) or run as a greedy bulk transfer, depending on what the
   subscriber needs to learn; and
 
-* carries a small header in every object, so the receiver can compute
-  throughput, delay variation and loss without clock synchronization.
+* uses the Low Overhead Media Container (LOC) {{LOC}}, the same object
+  format as the media it stands in for, and carries a send timestamp on
+  every object, so the receiver can compute throughput, delay variation
+  and loss without clock synchronization.
 
 The result of a probe is input to a switching decision, for example one
 made with the mechanism in {{TrackSwitching}}.
@@ -290,8 +293,7 @@ its defaults in the probe catalog.
 
 The resolution procedure is shown below. Divisions are real-valued
 unless floor() is applied. MAX_BYTES and MAX_DURATION are the relay's
-limits ({{limits}}), and HEADER_SIZE is the maximum size of the probe
-object header ({{payload}}).
+limits ({{limits}}).
 
 ~~~ pseudocode
 resolve(p):             // p: parsed keys, absent keys are null
@@ -327,7 +329,7 @@ resolve(p):             // p: parsed keys, absent keys are null
       b = p.b;  d = 8000 * b / r
     schedule = object i is released at t0 + i / f
 
-  if s < HEADER_SIZE:  fail DOES_NOT_EXIST
+  if s < 1:  fail DOES_NOT_EXIST  // rate too low for f
   check s, k * s, r, f, b, d against per-probe limits
                        else fail DOES_NOT_EXIST
   check concurrent probes and session byte budget
@@ -338,8 +340,7 @@ resolve(p):             // p: parsed keys, absent keys are null
   // payload size is k * s if its Object ID is 0, and s otherwise.
   // The relay stops after sending b bytes or after d ms, whichever
   // comes first, and truncates the last object so that the total
-  // does not exceed b. A truncated object is never shorter than
-  // HEADER_SIZE.
+  // does not exceed b.
 ~~~
 {: #probe-resolve title="Resolving probe parameters."}
 
@@ -373,7 +374,7 @@ relay MUST reject the request with error code DOES_NOT_EXIST if:
   without g, or f is present without r; or
 
 * a derived value is unusable, for example the resolved object size s
-  is smaller than HEADER_SIZE.
+  is zero because r is too low for the object rate f.
 
 ## Limits {#limits}
 
@@ -455,50 +456,50 @@ Subscribers SHOULD subscribe to probe tracks with subscriber priority
 subscriber's media, which is the capacity the subscriber wants to
 measure.
 
-## Object Payload {#payload}
+## Object Format {#payload}
 
-Each probe object payload starts with a header, followed by padding
-bytes that make up the object size.
+Probe objects use the Low Overhead Media Container (LOC) {{LOC}}, so
+that a probe looks to the network, the relay and the receiving
+application like the media track it stands in for.
 
-~~~
-Probe Object {
-  Sequence (i),
-  Send Timestamp (i),
-  Target Rate (i),
-  Total Objects (i),
-  Padding (..),
-}
-~~~
-{: #probe-object-format title="Probe object payload."}
+Each probe object carries the following LOC Public Properties in its
+MOQT Object Properties:
 
-Sequence:
+Timestamp (0x10):
 
-: The index of the object within the probe, starting at 0 and
-  increasing by 1 for each object, across groups.
+: The wall-clock time, in microseconds since the Unix epoch, at which
+  the relay released the object for sending. The relay MUST include it
+  in every probe object. The relay MUST NOT send a Timescale property,
+  so that the Timestamp is interpreted as wall-clock time. Receivers
+  can use differences between Timestamps without synchronized clocks.
+  Receivers whose clock is synchronized with the relay can also compute
+  one-way delay.
 
-Send Timestamp:
+Video Frame Marking (0x09):
 
-: The time, in microseconds, at which the relay released the object for
-  sending, as read from a monotonic clock local to the relay. The origin
-  of the clock is arbitrary. Receivers use only differences between
-  Send Timestamps.
+: For a paced probe with g present, the relay MAY include this property
+  and set the independent flag on the first object of each group only,
+  to imitate the key frames of a video track. The relay MUST NOT include
+  it otherwise.
 
-Target Rate:
+The LOC Payload of a probe object is padding: bytes that bring the
+payload to its resolved size (s, or k*s for the first object of a
+group). The relay SHOULD set them to zero, and receivers MUST ignore
+their values. A probe object does not contain media, so a probe track
+does not use LOC Private Properties, and a receiver MUST NOT pass a
+probe payload to a media decoder.
 
-: The resolved rate r in bits per second, or 0 for a greedy probe.
+Probe objects carry no other per-object fields:
 
-Total Objects:
+* The position of an object in the probe follows from its Location.
+  Object i is Group floor(i / g), Object ID i mod g ({{resolve}}).
+  A gap in Locations shows objects that were not delivered.
 
-: The number of objects the relay plans to send, or 0 if the number is
-  not known in advance (for example, a greedy probe bounded only by d).
+* The rate and the number of objects follow from the Probe Name and the
+  relay defaults, which the receiver can resolve itself with the
+  procedure in {{resolve}} and the probe catalog ({{catalog}}).
 
-Padding:
-
-: Bytes that fill the object up to its resolved size. The relay SHOULD
-  set them to zero. Receivers MUST ignore their values.
-
-HEADER_SIZE is 32 bytes, the largest possible size of the first four
-fields.
+* The end of the probe is signaled by PUBLISH_DONE.
 
 # Probe Catalog {#catalog}
 
@@ -529,8 +530,10 @@ Names work without it.
 ~~~
 {: #catalog-example title="Probe catalog example."}
 
-The `presets`, `defaults`, `limits` and `keys` members are each
-OPTIONAL. A relay MAY leave out `limits` to avoid revealing them. A
+The `defaults` member SHOULD be present, because receivers need the
+defaults to resolve a probe themselves ({{payload}}). The `presets`,
+`limits` and `keys` members are OPTIONAL. A relay MAY leave out `limits`
+to avoid revealing them. A
 subscriber subscribes to a preset by using its name as the Track Name,
 for example `hd-check`. When the catalog changes, the relay publishes
 the new catalog as a new group.
@@ -545,11 +548,11 @@ divided by the time between those arrivals. Excluding the first object
 reduces the effect of the request round trip.
 
 For a paced probe, the receiver compares, for each object, the gap
-between arrivals with the gap between Send Timestamps. If the arrival
+between arrivals with the gap between LOC Timestamps. If the arrival
 gaps keep growing relative to the send gaps, queuing delay is building
 up and the target rate is not sustainable. The receiver can also
-compare the receive rate over the probe with r. Missing Sequence values
-show objects that were not delivered, for example because the
+compare the receive rate over the probe with r. Gaps in object
+Locations show objects that were not delivered, for example because the
 subscription ended early.
 
 A subscriber that wants to switch from a track at rate R1 to a track at
@@ -569,9 +572,11 @@ Probe data goes only to the session that asked for it, over a
 congestion-controlled QUIC connection. Probes therefore cannot be used
 to reflect or amplify traffic toward a third party.
 
-Probe objects expose a relay's monotonic clock, at microsecond
-resolution, to subscribers. The clock origin is arbitrary, but relays
-that consider this a concern MAY add a random per-probe offset.
+Probe objects expose the relay's wall clock, at microsecond
+resolution, to subscribers through the LOC Timestamp property. Relays
+that consider this a concern MAY reduce the clock precision; receivers
+that use only differences between Timestamps are not affected by a
+constant offset.
 
 A relay MAY keep its limits out of Reason Phrases and the catalog, so
 that clients cannot use them to fingerprint the relay or tune requests
