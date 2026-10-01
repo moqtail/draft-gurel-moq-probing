@@ -50,7 +50,8 @@ informative:
 
 This document defines probe tracks for Media over QUIC Transport (MOQT).
 A probe track is a special track that a relay generates locally. It lives
-under the reserved Track Namespace `.probe`. A subscriber selects the
+under the reserved, session-scoped Track Namespace (`.session`,
+`.probe`). A subscriber selects the
 shape of the probe through the track name: target bitrate, duration or
 size, object rate, object size, group structure and key-object bursts.
 The relay serves the probe on the same session as the subscriber's media
@@ -195,28 +196,47 @@ as fast as possible.
 
 # Naming and Addressing {#naming}
 
+## Session Namespace {#session-ns}
+
+This document reserves the Track Namespace Field `.session` (eight
+bytes) as the first field of a session-scoped namespace. A track whose
+namespace starts with `.session` belongs to the MOQT session on which it
+is requested, and is served by the peer at the other end of that
+session. An endpoint that implements this specification:
+
+* MUST answer a SUBSCRIBE, FETCH, TRACK_STATUS or SUBSCRIBE_NAMESPACE
+  for a namespace that starts with `.session` itself, and MUST NOT
+  forward it upstream or to any other session;
+
+* MUST NOT share a session-scoped track between sessions or serve it
+  from a cache; and
+
+* MUST NOT announce a namespace that starts with `.session` to its
+  peers or upstream.
+
+Using a dedicated first field lets a relay recognize session-scoped
+requests with the namespace prefix check it already performs for
+routing, before any upstream lookup. The leading dot keeps the namespace
+apart from application namespaces. Probing is the first use of the
+session namespace; other session-scoped services can be defined in the
+same way, each with its own second field.
+
 ## Probe Namespace
 
-Relay probe tracks live in the Track Namespace that has a single Track
-Namespace Field containing the six bytes `.probe`. A subscriber can
-subscribe to a probe track without knowing any publisher namespace. A
-relay that implements this specification MUST NOT forward a SUBSCRIBE,
-FETCH or SUBSCRIBE_NAMESPACE for the `.probe` namespace upstream, and
-MUST answer it locally.
+Relay probe tracks live in the namespace (`.session`, `.probe`): two
+Track Namespace Fields, `.session` followed by `.probe` (six bytes). A
+subscriber can subscribe to a probe track without knowing any publisher
+namespace. The rules in {{session-ns}} apply, so a relay answers every
+probe request in this namespace itself.
 
-Probe tracks served by a publisher use a different namespace, described
-in {{publisher}}.
-
-Using a dedicated namespace lets a relay recognize probe requests with
-the namespace prefix check it already performs for routing, before any
-upstream lookup. The leading dot keeps the namespace apart from
-application namespaces.
+Probe tracks served by a publisher through relays use a different
+namespace, described in {{publisher}}.
 
 Relays SHOULD also accept the following equivalent form: an empty Track
 Namespace (zero Track Namespace Fields) and a Track Name that starts with
 the bytes `.probe/`, followed by a Probe Name. For example, the empty
 namespace with Track Name `.probe/d1000-r300000` is equivalent to the
-namespace `.probe` with Track Name `d1000-r300000`.
+namespace (`.session`, `.probe`) with Track Name `d1000-r300000`.
 
 ## Dynamic Probe Names {#grammar}
 
@@ -429,7 +449,7 @@ Dynamic Probe Name can switch to a Preset Name from the catalog, or retry
 with smaller values.
 
 A relay that does not implement this specification also responds to a
-SUBSCRIBE for the `.probe` namespace with DOES_NOT_EXIST, or forwards it
+SUBSCRIBE in the (`.session`, `.probe`) namespace with DOES_NOT_EXIST, or forwards it
 to a publisher that does the same. Subscribers therefore use the probe
 catalog to discover support ({{catalog}}), not the result of a probe
 request.
@@ -513,13 +533,13 @@ Probe objects carry no other per-object fields:
 # Probe Catalog {#catalog}
 
 A relay that implements this specification MUST serve a catalog track
-named `catalog` in the `.probe` namespace. The catalog uses the Common
+named `catalog` in the (`.session`, `.probe`) namespace. The catalog uses the Common
 Catalog Format {{CommonCatalogFormat}}.
 
 ## Catalog as Proof of Support
 
 A subscriber learns whether a relay supports probing by subscribing to
-the `.probe` catalog. If the subscription succeeds, the relay supports
+the probe catalog. If the subscription succeeds, the relay supports
 this specification. If it fails with DOES_NOT_EXIST, the relay does not,
 and the subscriber does not send probe requests to it. A rejected probe
 request alone does not tell the two cases apart (see {{validation}}).
@@ -544,8 +564,10 @@ The `streamingFormat` field is set to the custom value `probe`, and
 subscribers that implement this specification, so a custom value is
 enough to identify it, and other subscribers never need to parse it.
 `probeName` is likewise a custom field. The common track fields set the
-namespace to `.probe` and the packaging to `loc` ({{payload}}). A catalog with no presets has an empty `tracks`
-array; it still proves support for Dynamic Probe Names.
+packaging to `loc` ({{payload}}). The catalog does not set `namespace`,
+so the tracks inherit the namespace of the catalog track itself. A
+catalog with no presets has an empty `tracks` array; it still proves
+support for Dynamic Probe Names.
 
 ~~~ json
 {
@@ -553,7 +575,6 @@ array; it still proves support for Dynamic Probe Names.
   "streamingFormat": "probe",
   "streamingFormatVersion": "1",
   "commonTrackFields": {
-    "namespace": ".probe",
     "packaging": "loc"
   },
   "tracks": [
@@ -607,8 +628,10 @@ logic: the same Probe Names ({{naming}}), parameter resolution
 ## Direct Sessions
 
 When a subscriber is connected directly to a publisher, with no relay in
-between, the publisher MAY answer requests for the `.probe` namespace
-exactly as a relay does, including the `.probe` catalog. Everything this
+between, the publisher MAY answer requests for the (`.session`,
+`.probe`) namespace exactly as a relay does, including the probe
+catalog. This follows from {{session-ns}}: the session-scoped namespace
+is always answered by the peer, whichever role it has. Everything this
 document says about relays then applies to the publisher.
 
 ## Probe Tracks in a Publisher's Namespace
@@ -622,8 +645,10 @@ A publisher probe namespace is the publisher's namespace with one more
 Track Namespace Field, `.probe`, appended. For example, a publisher of
 the namespace (`live`, `show`) offers probe tracks in the namespace
 (`live`, `show`, `.probe`). The publisher serves a catalog track named
-`catalog` in that namespace, in the format of {{catalog}}, with the
-`namespace` common track field set to the publisher probe namespace.
+`catalog` in that namespace, in the format of {{catalog}}; its tracks
+inherit the publisher probe namespace from the catalog track. Publisher
+probe tracks are not session-scoped: they travel through relays like
+other tracks of the publisher.
 The catalog lists the presets the publisher offers. A publisher MAY
 also accept Dynamic Probe Names in that namespace.
 
@@ -732,7 +757,10 @@ this document.
   `probeName` catalog field should be registered (see {{catalog}}).
 
 * Whether to keep the empty-namespace form of probe names, or to require
-  the `.probe` namespace.
+  the (`.session`, `.probe`) namespace.
+
+* Whether the session namespace ({{session-ns}}) belongs in this
+  document or in a separate one, since it is useful beyond probing.
 
 * Whether a relay should be allowed to clamp parameters to its limits
   and report the values it actually uses in SUBSCRIBE_OK, as an
