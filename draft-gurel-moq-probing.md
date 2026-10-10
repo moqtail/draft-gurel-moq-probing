@@ -751,10 +751,11 @@ sending REQUEST_UPDATE with Forward State 0, or end it by terminating
 the subscription. The relay discards all probe objects after it has
 measured their arrival.
 
-QUIC flow control is the relay's last-resort limit on an uplink probe.
-A relay SHOULD NOT use flow control to slow down a probe that stays
-within its declared shape, because a flow-control-limited probe measures
-the relay's limit, not the capacity of the network.
+A relay SHOULD apply the same flow control that it applies to ordinary
+(e.g., media) streams to uplink probe streams as long as the probe track
+stays within its pre-defined limits, that is, the parameters in its
+Probe Name. Flow control is then part of the path being measured, as it
+will be for the publisher's media.
 
 ## Measurement Result
 
