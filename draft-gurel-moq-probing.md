@@ -12,6 +12,7 @@ workgroup: MOQ
 keyword:
  - Internet-Draft
  - bandwidth estimation
+ - probing
  - adaptive bitrate
 
 stand_alone: yes
