@@ -57,7 +57,10 @@ size, object rate, object size, group structure and key-object bursts.
 The relay serves the probe on the same session as the subscriber's media
 and never forwards the request upstream. The subscriber can therefore
 measure, on the relay-to-subscriber hop, whether a higher bitrate is
-sustainable before it switches to a higher-quality track.
+sustainable before it switches to a higher-quality track. The same
+mechanism works in the other direction: a publisher can publish a probe
+track to a relay under the session-scoped namespace (`.session`,
+`.sink`) to measure the hop from the publisher to the relay.
 
 --- middle
 
@@ -137,6 +140,18 @@ Preset Name:
 : A Probe Name that the relay maps to a set of probe parameters, as
   advertised in the probe catalog ({{catalog}}).
 
+Downlink Probe:
+
+: A probe that a subscriber requests with SUBSCRIBE in the (`.session`,
+  `.probe`) namespace, and that the relay generates and sends to the
+  subscriber.
+
+Uplink Probe:
+
+: A probe that a publisher sends with PUBLISH in the (`.session`,
+  `.sink`) namespace to a relay, which consumes and discards it
+  ({{uplink}}).
+
 Paced Probe:
 
 : A probe sent at a target rate, with objects released on a schedule.
@@ -208,11 +223,16 @@ session. An endpoint that implements this specification:
   for a namespace that starts with `.session` itself, and MUST NOT
   forward it upstream or to any other session;
 
+* MUST consume a PUBLISH for a namespace that starts with `.session`
+  itself, and MUST NOT forward the track or its objects upstream, to any
+  subscriber, or to any other session;
+
 * MUST NOT share a session-scoped track between sessions or serve it
   from a cache; and
 
 * MUST NOT announce a namespace that starts with `.session` to its
-  peers or upstream.
+  peers or upstream. A PUBLISH of a session-scoped track goes only to
+  the peer of the session and ends there.
 
 Using a dedicated first field lets a relay recognize session-scoped
 requests with the namespace prefix check it already performs for
@@ -228,6 +248,12 @@ Track Namespace Fields, `.session` followed by `.probe` (six bytes). A
 subscriber can subscribe to a probe track without knowing any publisher
 namespace. The rules in {{session-ns}} apply, so a relay answers every
 probe request in this namespace itself.
+
+A SUBSCRIBE in the (`.session`, `.probe`) namespace is always served by
+the relay's own probe generator. A relay MUST NOT treat it as a
+subscription to a track that the same endpoint publishes. Uplink probes
+use a separate namespace, (`.session`, `.sink`) ({{uplink}}), so the
+same Full Track Name never names both a downlink and an uplink probe.
 
 Probe tracks served by a publisher through relays use a different
 namespace, described in {{publisher}}.
@@ -425,6 +451,21 @@ The relay MUST NOT silently clamp the parameters, because a subscriber
 that measures a different probe from the one it asked for draws the
 wrong conclusion.
 
+Unless configured otherwise, a relay SHOULD apply the following default
+limits. They apply to downlink and uplink probes alike, separately for
+each direction.
+
+| Limit | Default |
+|:------|:--------|
+| Maximum duration (d) | 5000 ms |
+| Maximum total bytes (b) | 10,000,000 bytes |
+| Maximum rate (r) | 50,000,000 bits per second |
+| Maximum object size (k*s) | 1,048,576 bytes |
+| Concurrent probes per session | 1 |
+| Minimum time between the end of one probe and the start of the next | 1000 ms |
+| Probe bytes per session | 50,000,000 bytes per 60 s |
+{: #default-limits title="Default probe limits."}
+
 ## Error Reporting
 
 This document defines no new error codes. A relay rejects a probe with
@@ -467,7 +508,8 @@ REQUEST_ERROR and error code NOT_SUPPORTED.
 
 After SUBSCRIBE_OK, the relay sends the objects according to the
 resolved schedule. When the probe ends, it ends the subscription with
-PUBLISH_DONE. A subscriber can stop a probe early by unsubscribing.
+PUBLISH_DONE. A subscriber can stop a probe early by terminating the
+subscription.
 
 The relay sends each group on its own subgroup stream with Subgroup ID
 0. A greedy probe, and a paced probe without g, is one group on one
@@ -511,8 +553,9 @@ Video Frame Marking (0x09):
 
 The payload of a probe object takes the place of the LOC Payload, and
 consists of padding: bytes that bring the payload to its resolved size
-(s, or k*s for the first object of a group). The relay SHOULD set them
-to zero, and receivers MUST ignore their values. Probe objects carry no
+(s, or k*s for the first object of a group). The sender SHOULD set
+them to zero, and receivers MUST ignore their values. This applies to
+downlink and uplink probes alike. Probe objects carry no
 LOC Private Properties. Because the payload is not media, a receiver
 MUST NOT pass a probe payload to a media decoder, even if it parses
 probe objects with a LOC parser.
@@ -529,6 +572,15 @@ Probe objects carry no other per-object fields:
   Dynamic Probe Name that the catalog gives for it ({{catalog}}).
 
 * The end of the probe is signaled by PUBLISH_DONE.
+
+TBD: Whether padding should be zeros or the output of a pseudorandom
+number generator. Zeros are free to produce. MOQT always runs over an
+encrypted QUIC connection, so zero padding looks random on the wire,
+cannot be compressed by the network, and does not weaken QUIC's AEAD
+ciphers, which resist known-plaintext attacks. Only the two endpoints
+see the plaintext, and probe objects are never cached. A pseudorandom
+payload would matter only if a receiver needed to verify that the sender
+generated the payload as specified.
 
 # Probe Catalog {#catalog}
 
@@ -563,7 +615,10 @@ The `streamingFormat` field is set to the custom value `probe`, and
 `streamingFormatVersion` to `1`. The probe catalog is read only by
 subscribers that implement this specification, so a custom value is
 enough to identify it, and other subscribers never need to parse it.
-`probeName` is likewise a custom field. The common track fields set the
+`probeName` is likewise a custom field. The custom root field
+`acceptsPublish` tells publishers whether the relay accepts uplink
+probes ({{uplink}}); if it is absent or false, the relay serves only
+downlink probes. The common track fields set the
 packaging to `loc` ({{payload}}). The catalog does not set `namespace`,
 so the tracks inherit the namespace of the catalog track itself. A
 catalog with no presets has an empty `tracks` array; it still proves
@@ -574,6 +629,7 @@ support for Dynamic Probe Names.
   "version": 1,
   "streamingFormat": "probe",
   "streamingFormatVersion": "1",
+  "acceptsPublish": true,
   "commonTrackFields": {
     "packaging": "loc"
   },
@@ -617,7 +673,103 @@ such as `probeName`. Discuss whether the custom `probe` value and the
 unprefixed `probeName` field are acceptable, or whether they should be
 registered.
 
-# Probes Served by Publishers {#publisher}
+# Uplink Probes {#uplink}
+
+Downlink probes measure the hop from a relay to a subscriber. A
+publisher needs the opposite measurement: how much it can send to its
+first relay, for example to choose the bitrates it encodes. An uplink
+probe uses the same Probe Names, parameter resolution and object format
+as a downlink probe, but the publisher generates and sends the objects,
+and the relay consumes them.
+
+## Sink Namespace
+
+Uplink probes live in the namespace (`.session`, `.sink`): two Track
+Namespace Fields, `.session` followed by `.sink` (five bytes). The rules
+in {{session-ns}} apply: the relay consumes an uplink probe itself,
+never caches it, and never forwards it upstream or to any subscriber,
+including the publisher itself. FETCH and SUBSCRIBE MUST NOT be used in
+this namespace; a relay rejects them with REQUEST_ERROR and error code
+NOT_SUPPORTED.
+
+The Track Name of an uplink probe MUST be a Dynamic Probe Name
+({{grammar}}). Preset Names are not used for uplink probes, because the
+publisher has to resolve the parameters ({{resolve}}) to generate the
+probe anyway.
+
+A publisher learns whether a relay accepts uplink probes from the
+`acceptsPublish` field of the probe catalog ({{catalog}}).
+
+## Starting an Uplink Probe
+
+The publisher sends PUBLISH for the uplink probe track with the FORWARD
+parameter set to 0, and MUST NOT send any objects until the relay sets
+the Forward State to 1. The relay validates the Probe Name with the
+rules in {{validation}}. If the probe is acceptable, the relay sends
+PUBLISH_OK with Forward State 1, and the publisher starts the probe.
+Otherwise, the relay rejects the PUBLISH.
+
+Waiting for the relay keeps it in control of what it receives: the
+relay checks the request against its limits before any probe data
+arrives. The time at which the publisher receives Forward State 1 is
+also a clean start time for the measurement.
+
+A relay that receives a PUBLISH in the (`.session`, `.sink`) namespace
+with Forward State 1, or without the FORWARD parameter (which defaults
+to 1), MUST reject it with REQUEST_ERROR, MUST discard any objects
+already received for it, and SHOULD count those bytes against the
+session limits. The relay MUST NOT close the session for this reason: a
+bad probe request affects only the probe, not the media on the same
+session.
+
+In a PUBLISH, the relay acts as the subscriber, so it uses the following
+existing error codes:
+
+| Condition | Error Code | Retry Interval |
+|:----------|:-----------|:---------------|
+| Invalid Probe Name, a Preset Name, or Forward State 1 | UNINTERESTED | 0 |
+| Per-probe limit exceeded | UNINTERESTED | 0 |
+| Session limit exceeded | EXCESSIVE_LOAD | time until the request can succeed |
+| Session not allowed to send uplink probes | UNAUTHORIZED | 0 |
+{: #uplink-errors title="Error codes for uplink probe requests."}
+
+The Reason Phrase carries the detail, as for downlink probes.
+
+## Sending and Enforcement
+
+The publisher sends the probe according to the resolved parameters,
+with the object format in {{payload}}. The LOC Timestamp carries the
+publisher's send time. The publisher MUST send uplink probe objects with
+the lowest publisher priority, so that the probe uses only capacity left
+over after its media, and ends the probe with PUBLISH_DONE.
+
+A relay MUST enforce the declared shape. If the publisher sends more
+bytes than b, sends for longer than d, or sends faster than r by a
+margin that the relay chooses, the relay SHOULD pause the probe by
+sending REQUEST_UPDATE with Forward State 0, or end it by terminating
+the subscription. The relay discards all probe objects after it has
+measured their arrival.
+
+QUIC flow control is the relay's last-resort limit on an uplink probe.
+A relay SHOULD NOT use flow control to slow down a probe that stays
+within its declared shape, because a flow-control-limited probe measures
+the relay's limit, not the capacity of the network.
+
+## Measurement Result
+
+The relay receives the probe, but the publisher needs the result. The
+publisher can estimate the uplink capacity on its own side, from the
+delivery rate that its congestion controller observes while it sends
+the probe; a greedy probe is the most suitable shape for this. How much
+of this information is available depends on the publisher's transport
+API.
+
+TBD: A way for the relay to report what it measured, for example a
+session-scoped result track, such as (`.session`, `.probe`, `.result`),
+on which the relay publishes one object with the measured throughput and
+delay for each uplink probe, and to which the publisher subscribes.
+
+# Downlink Probes Served by Publishers {#publisher}
 
 Any MOQT endpoint that acts as a publisher can serve probe tracks with
 the same logic as a relay: the same Probe Names, parameter resolution,
@@ -665,12 +817,25 @@ while it keeps receiving the current track. If the probe is delivered on
 time, the path is likely to sustain R2, and the subscriber can switch
 (see {{TrackSwitching}}).
 
+For an uplink probe, the same calculations apply on the relay side,
+with arrival times at the relay and the publisher's LOC Timestamps. A
+publisher that estimates from its own congestion controller uses a
+greedy probe and reads the delivery rate at the end of the probe
+({{uplink}}).
+
 # Security Considerations {#security}
 
 A small SUBSCRIBE can cause a relay to send a large amount of data.
 Without limits, a client could use probes to use up relay bandwidth,
 CPU or memory. Relays MUST enforce the limits in {{limits}}, and MAY
 require that a session be authorized before it can use probes.
+
+Uplink probes let a publisher send a large amount of data to a relay.
+The relay keeps control by requiring Forward State 0 in the PUBLISH and
+checking limits before it allows any probe data, by enforcing the
+declared shape, and by counting rejected data against the session
+limits ({{uplink}}). Relays MAY accept uplink probes only from
+authorized publishers.
 
 Probe data goes only to the session that asked for it, over a
 congestion-controlled QUIC connection. Probes therefore cannot be used
@@ -696,6 +861,14 @@ IANA registry, so that new keys can be added later without updating
 this document.
 
 # Open Issues
+
+* How a relay reports the result of an uplink probe to the publisher
+  (see {{uplink}}).
+
+* Whether probe padding should be zeros or pseudorandom bytes (see
+  {{payload}}).
+
+* Whether `acceptsPublish` should be a registered catalog field.
 
 * Whether the probe parameter keys need an IANA registry (see
   {{iana}}).
