@@ -78,24 +78,6 @@ receives a 1 Mbps track at 1 Mbps learns only that at least 1 Mbps is
 available. To learn whether 3 Mbps is sustainable, it has to make more
 data flow over the hop.
 
-MOQT offers some tools for this, but none of them fits well:
-
-* A subscriber can subscribe to a higher-bitrate track at a low
-  priority. This pulls real media through the whole relay chain, and
-  may start upstream fetches and cache fills. The subscriber controls
-  neither the amount of data nor its pacing. If the probe fails, the
-  data was wasted.
-
-* A publisher can encode at a higher bitrate and see whether it gets
-  through. If it does not, the media quality suffers before the
-  publisher can react.
-
-* An endpoint can send padding streams to probe for bandwidth. Padding
-  is started by the sender, so the receiver cannot request it, choose
-  its rate or bound its duration. Padding also carries no sequence or
-  timing information that the receiver could use to compute delay
-  trends.
-
 This document defines probe tracks: tracks of synthetic objects,
 generated on demand in a shape described by the track name, that
 measure the bandwidth of a single hop. Probe tracks are session-scoped:
