@@ -682,9 +682,11 @@ Uplink probes live in the namespace (`.session`, `.sink`): two Track
 Namespace Fields, `.session` followed by `.sink` (five bytes). The rules
 in {{session-ns}} apply: the relay consumes an uplink probe itself,
 never caches it, and never forwards it upstream or to any subscriber,
-including the publisher itself. FETCH and SUBSCRIBE MUST NOT be used in
-this namespace; a relay rejects them with REQUEST_ERROR and error code
-NOT_SUPPORTED.
+including the publisher itself. Messages except PUBLISH MUST NOT be used
+in this namespace; a relay rejects any other request that names it with
+REQUEST_ERROR and error code NOT_SUPPORTED. This does not restrict the
+messages of an established PUBLISH-initiated subscription, such as
+PUBLISH_OK, REQUEST_UPDATE and PUBLISH_DONE.
 
 The Track Name of an uplink probe MUST be a Dynamic Probe Name
 ({{grammar}}). Preset Names are not used for uplink probes, because the
