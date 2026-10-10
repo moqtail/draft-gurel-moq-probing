@@ -11,7 +11,7 @@ submissionType: IETF
 workgroup: MOQ
 keyword:
  - Internet-Draft
- - bandwidth probing
+ - bandwidth estimation
  - adaptive bitrate
 
 stand_alone: yes
