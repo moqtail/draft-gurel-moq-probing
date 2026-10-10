@@ -615,10 +615,7 @@ The `streamingFormat` field is set to the custom value `probe`, and
 `streamingFormatVersion` to `1`. The probe catalog is read only by
 subscribers that implement this specification, so a custom value is
 enough to identify it, and other subscribers never need to parse it.
-`probeName` is likewise a custom field. The custom root field
-`acceptsPublish` tells publishers whether the relay accepts uplink
-probes ({{uplink}}); if it is absent or false, the relay serves only
-downlink probes. The common track fields set the
+`probeName` is likewise a custom field. The common track fields set the
 packaging to `loc` ({{payload}}). The catalog does not set `namespace`,
 so the tracks inherit the namespace of the catalog track itself. A
 catalog with no presets has an empty `tracks` array; it still proves
@@ -629,7 +626,6 @@ support for Dynamic Probe Names.
   "version": 1,
   "streamingFormat": "probe",
   "streamingFormatVersion": "1",
-  "acceptsPublish": true,
   "commonTrackFields": {
     "packaging": "loc"
   },
@@ -697,8 +693,13 @@ The Track Name of an uplink probe MUST be a Dynamic Probe Name
 publisher has to resolve the parameters ({{resolve}}) to generate the
 probe anyway.
 
-A publisher learns whether a relay accepts uplink probes from the
-`acceptsPublish` field of the probe catalog ({{catalog}}).
+TBD: How a publisher learns whether a relay accepts uplink probes. The
+probe catalog proves support for downlink probes only. Options include a
+custom root field in the probe catalog, such as `"acceptsPublish":
+true`, or a SETUP option that the relay sends when the session is
+established. A SETUP option is likely the better fit, because it tells
+the publisher before it sends any request, and it covers relays that do
+not serve downlink probes.
 
 ## Starting an Uplink Probe
 
@@ -868,7 +869,8 @@ this document.
 * Whether probe padding should be zeros or pseudorandom bytes (see
   {{payload}}).
 
-* Whether `acceptsPublish` should be a registered catalog field.
+* How a publisher discovers support for uplink probes: a catalog field
+  or a SETUP option (see {{uplink}}).
 
 * Whether the probe parameter keys need an IANA registry (see
   {{iana}}).
