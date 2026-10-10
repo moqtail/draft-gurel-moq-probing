@@ -1,5 +1,5 @@
 ---
-title: "Bandwidth Probing in Media over QUIC Transport"
+title: "Probe Tracks for Bandwidth Estimation in Media over QUIC Transport"
 abbrev: moq-probing
 docname: draft-gurel-moq-probing-latest
 date: {DATE}
