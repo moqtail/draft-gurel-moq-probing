@@ -578,9 +578,7 @@ number generator. Zeros are free to produce. MOQT always runs over an
 encrypted QUIC connection, so zero padding looks random on the wire,
 cannot be compressed by the network, and does not weaken QUIC's AEAD
 ciphers, which resist known-plaintext attacks. Only the two endpoints
-see the plaintext, and probe objects are never cached. A pseudorandom
-payload would matter only if a receiver needed to verify that the sender
-generated the payload as specified.
+see the plaintext, and probe objects are never cached.
 
 # Probe Catalog {#catalog}
 
