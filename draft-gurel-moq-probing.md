@@ -114,11 +114,12 @@ probe:
 The result of a probe is input to a switching decision, for example one
 made with the mechanism in {{TrackSwitching}}.
 
-Publishers have the mirror-image problem: before choosing the bitrates
-to encode, a publisher needs to know how much it can send to its first
-relay. In an uplink probe, the publisher generates a probe track with
-the same naming and object format and publishes it to the relay, which
-consumes it without forwarding it ({{uplink}}).
+Publishers, on the other hand, need to tune their encoding parameters
+dynamically to the uplink network conditions, and therefore need to
+estimate the uplink bandwidth. In an uplink probe, the publisher
+generates a probe track with the same naming and object format and
+publishes it to its first relay, which consumes it without forwarding it
+({{uplink}}).
 
 ## Terms and Definitions
 
