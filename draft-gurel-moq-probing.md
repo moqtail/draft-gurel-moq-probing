@@ -197,7 +197,8 @@ Paced Probe:
 Greedy Probe:
 
 : A probe sent as fast as the congestion controller and flow control
-  allow, bounded by size or duration.
+  allow, up to the relay's maximum rate, bounded by its size and,
+  optionally, its duration.
 
 ## Notational Conventions
 
@@ -311,7 +312,7 @@ expresses them through one set of parameters.
 | Shape | Question it answers | Properties |
 |:------|:--------------------|:-----------|
 | Paced | Can the hop sustain X bps right now, alongside the media? | Low impact. The flow is application-limited, so it confirms X but does not reveal capacity above X. |
-| Greedy | How much headroom does the hop have? | High impact and bursty. Slow start and congestion window growth affect short probes. |
+| Greedy | How much headroom does the hop have? | High impact and bursty. Capped at the relay's maximum rate. Slow start and congestion window growth affect short probes. |
 {: #shape-table title="Probe shapes."}
 
 A paced probe can be a smooth stream at a target rate, or it can imitate
@@ -354,7 +355,7 @@ The parameter keys are:
 |:---:|:-----|:-----|:--------|
 | r | Rate | bits per second | Target payload rate. If absent, the probe is greedy. |
 | d | Duration | milliseconds | Maximum duration of the probe. |
-| b | Bytes | bytes | Maximum total payload bytes of the probe. |
+| b | Bytes | bytes | Maximum total payload bytes of the probe. Required for a greedy probe. |
 | f | Object rate | objects per second | Pacing rate of objects; the frame rate of an imitated video track. |
 | s | Object size | bytes | Base object payload size. |
 | g | Group size | objects | Number of objects per group. |
@@ -408,17 +409,19 @@ objects per second, that is, one object every 20 ms. The default greedy
 object size (DEFAULT_GREEDY_S) is 16384 bytes. The default key
 multiplier is 1. When g is absent, the whole probe is one group.
 
-A greedy probe that gives only d has no byte bound, and a greedy probe
-that gives only b has no time bound. Resolution leaves such a bound
-open, so that it does not depend on the relay's limits, which the other
-endpoint may not know. The relay's limits ({{limits}}) still apply
-while the probe runs: a greedy probe that reaches one of them ends
-early, as described in {{downlink}} and {{uplink}}. This is not
-clamping, because the Probe Name did not ask for more.
+A greedy probe MUST give b. Bytes are the natural size of a greedy
+transfer, like the download of a segment, and they are the resource
+that the relay has to protect, so the relay can check every greedy
+probe against its byte limit before it accepts it. A greedy probe MAY
+also give d as a time bound. A greedy probe has no target rate: it is
+sent as fast as the hop allows, but never faster than the relay's
+maximum rate ({{limits}}). A greedy probe without d ends after b bytes,
+or earlier if it reaches the relay's maximum duration, as described in
+{{downlink}} and {{uplink}}.
 
 The resolution procedure is shown below. Divisions are real-valued
 unless floor() is applied. A failure is one of the outcomes INVALID,
-PER_PROBE_LIMIT or SESSION_LIMIT, which map to error codes as described
+PER_PROBE_LIMIT or LOAD_LIMIT, which map to error codes as described
 in {{errors}}.
 
 ~~~ pseudocode
@@ -432,10 +435,11 @@ resolve(p):             // p: parsed keys, absent keys are null
 
   if p.r == null:                  // greedy probe
     if p.f != null:  fail INVALID  // greedy is not paced
+    if p.b == null:  fail INVALID  // greedy needs b
     s = p.s or DEFAULT_GREEDY_S
-    b = p.b                        // null: no byte bound
-    d = p.d                        // null: no time bound
-    schedule = as fast as possible
+    b = p.b
+    d = p.d          // null: within the relay's max duration
+    schedule = as fast as possible, up to the max rate
   else:                            // paced probe
     r = p.r
     if p.f != null:
@@ -456,11 +460,11 @@ resolve(p):             // p: parsed keys, absent keys are null
     schedule = object i is released at t0 + i / f
 
   if s < 1:  fail INVALID  // rate too low for f
-  check s, k * s, r, f and every bound of b and d that is
-    not open against the per-probe limits
+  check s, k * s, r, f, b and d (if present) against the
+    per-probe limits
                        else fail PER_PROBE_LIMIT
-  check concurrent probes and session byte budget
-                       else fail SESSION_LIMIT
+  check the session and relay-wide limits
+                       else fail LOAD_LIMIT
 
   // Object i (i = 0, 1, ...) is in Group floor(i / g) (Group 0
   // if g is null), with Object ID i mod g (i if g is null). Its
@@ -477,7 +481,7 @@ defaults.
 | Probe Name | Shape | Resolved values |
 |:-----------|:------|:----------------|
 | `d2000-r300000` | paced | f = 50, s = 750, 100 objects, b = 75,000, one group |
-| `b500000` | greedy | s = 16,384, 31 objects (the last one truncated), one group, no time bound |
+| `b500000` | greedy | s = 16,384, 31 objects (the last one truncated), one group, ends after b bytes |
 | `d2000-f30-g30-k5-r3000000` | paced | s = 11,029, first object of each group 55,145, 60 objects in 2 groups |
 {: #probe-examples title="Resolved examples."}
 
@@ -500,8 +504,9 @@ invalid if:
 * a value has a leading zero, does not fit in 62 bits, or is zero for
   any of r, d, b, f, s, g or k;
 
-* neither d nor b is present, both f and s are present, k is present
-  without g, or f is present without r; or
+* neither d nor b is present, r is absent (a greedy probe) and b is
+  absent, both f and s are present, k is present without g, or f is
+  present without r; or
 
 * a derived value is unusable, for example the resolved object size s
   is zero because r is too low for the object rate f.
@@ -517,13 +522,26 @@ total bytes and the object size of a single probe, the number of probes
 running at the same time on a session, and the total probe bytes per
 session over a period of time.
 
+Per-session limits do not protect the relay's capacity: many sessions,
+each within its own limits, can still use up the relay's egress
+capacity with downlink probes or its ingress capacity with uplink
+probes. A relay MUST therefore also limit, across all sessions and
+separately for each direction, the number of probes running at the same
+time and the total rate of probe traffic.
+
+The maximum rate applies to every probe. A paced probe whose r exceeds
+it is rejected. A greedy probe has no r, so the probe sender MUST NOT
+send it faster than the maximum rate: the relay enforces this directly
+for a downlink probe, and as part of the declared shape for an uplink
+probe ({{uplink}}).
+
 A per-probe limit (rate, duration, total bytes or object size) that is
 exceeded can never be met at this relay, so the relay MUST reject the
 request with the per-probe limit error code in {{errors}} and a Retry
 Interval of 0.
 
-A session limit (concurrent probes or the per-session byte budget) that
-is exceeded can be met later, so the relay MUST reject the request with
+A session limit (concurrent probes or the per-session byte budget) or a
+relay-wide limit that is exceeded can be met later, so the relay MUST reject the request with
 error code EXCESSIVE_LOAD and SHOULD set the Retry Interval to the time
 after which the request is expected to succeed.
 
@@ -544,7 +562,12 @@ each direction.
 | Concurrent probes per session | 1 |
 | Minimum time between the end of one probe and the start of the next | 1000 ms |
 | Probe bytes per session | 50,000,000 bytes per 60 s |
+| Concurrent probes across all sessions | Set by the relay operator |
+| Total probe rate across all sessions | Set by the relay operator |
 {: #default-limits title="Default probe limits."}
+
+The relay-wide limits depend on the relay's capacity, so this document
+gives no default for them.
 
 ## Error Codes {#errors}
 
@@ -559,7 +582,7 @@ codes differ by direction:
 | Invalid probe ({{checks}}) | DOES_NOT_EXIST | UNINTERESTED | 0 |
 | PUBLISH with Forward State 1 | - | UNINTERESTED | 0 |
 | Per-probe limit exceeded | DOES_NOT_EXIST | UNINTERESTED | 0 |
-| Session limit exceeded | EXCESSIVE_LOAD | EXCESSIVE_LOAD | time until the request can succeed |
+| Session or relay-wide limit exceeded | EXCESSIVE_LOAD | EXCESSIVE_LOAD | time until the request can succeed |
 | Session not allowed to use probes | UNAUTHORIZED | UNAUTHORIZED | 0 |
 | Other request in the namespace, such as FETCH | NOT_SUPPORTED | NOT_SUPPORTED | 0 |
 {: #probe-errors title="Error codes for probe requests."}
@@ -666,9 +689,10 @@ whatever the subscription filter. A FETCH for a probe track is rejected
 
 After SUBSCRIBE_OK, the relay sends the objects according to the
 resolved schedule. When the probe ends, it ends the subscription with
-PUBLISH_DONE. A greedy probe with an open bound ends when the relay
-reaches its own limit ({{resolve}}). A subscriber can stop a probe
-early by terminating the subscription.
+PUBLISH_DONE. The relay sends a greedy probe as fast as the hop allows,
+but never faster than its maximum rate; a greedy probe without d ends
+early if it reaches the relay's maximum duration ({{resolve}}). A
+subscriber can stop a probe early by terminating the subscription.
 
 Subscribers SHOULD subscribe to probe tracks with subscriber priority
 255, so that, together with the lowest publisher priority
@@ -839,10 +863,13 @@ A relay MUST enforce the declared shape. If the publisher sends more
 bytes than b, sends for longer than d, or sends faster than r by a
 margin that the relay chooses, the relay SHOULD pause the probe by
 sending REQUEST_UPDATE with Forward State 0, or end it by terminating
-the subscription. A greedy probe with an open bound ends when it
-reaches the relay's limit ({{resolve}}): the relay then terminates the
-subscription. The relay discards all probe objects after it has
-measured their arrival.
+the subscription. A greedy probe has no r, so the relay applies its
+maximum rate instead, and treats a greedy probe that exceeds it like
+any other violation of the declared shape; the publisher then knows
+only that the hop sustained at least the rate it reached. A greedy
+probe without d that reaches the relay's maximum duration ends: the
+relay terminates the subscription. The relay discards all probe objects
+after it has measured their arrival.
 
 A relay SHOULD apply the same flow control that it applies to ordinary
 (e.g., media) streams to uplink probe streams as long as the probe track
@@ -917,6 +944,14 @@ for an uplink probe. Without limits, an endpoint could use probes to use
 up relay bandwidth, CPU or memory. Relays MUST enforce the limits in
 {{limits}} in both directions, and MAY require that a session be
 authorized before it can use probes.
+
+Greedy probes are the main threat to relay capacity, because they use
+all the capacity they can get, up to the relay's maximum rate. The
+relay-wide limits ({{limits}}) keep many simultaneous greedy probes from
+using up the relay's egress or ingress capacity. Lowest priority makes
+a probe yield only to the media of its own session, not to other
+sessions at a shared bottleneck. A relay MAY refuse greedy probes
+entirely, or accept them only from authorized sessions.
 
 For uplink probes, the relay keeps control by requiring Forward State 0
 in the PUBLISH and checking limits before it allows any probe data, by
