@@ -1,6 +1,6 @@
-# Bandwidth Probing with Relay-Generated Tracks in Media over QUIC Transport
+# Bandwidth Probing in Media over QUIC Transport
 
-This is the working area for the Internet-Draft, "Bandwidth Probing with Relay-Generated Tracks in Media over QUIC Transport".
+This is the working area for the Internet-Draft, "Bandwidth Probing in Media over QUIC Transport".
 
 * Editor's Copy: open the latest run of the
   [Build Draft](https://github.com/moqtail/draft-gurel-moq-probing/actions/workflows/build.yml)

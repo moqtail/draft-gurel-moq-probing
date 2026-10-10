@@ -1,5 +1,5 @@
 ---
-title: "Bandwidth Probing with Relay-Generated Tracks in Media over QUIC Transport"
+title: "Bandwidth Probing in Media over QUIC Transport"
 abbrev: moq-probing
 docname: draft-gurel-moq-probing-latest
 date: {DATE}
@@ -48,19 +48,19 @@ informative:
 
 --- abstract
 
-This document defines probe tracks for Media over QUIC Transport (MOQT).
-A probe track is a special track that a relay generates locally. It lives
-under the reserved, session-scoped Track Namespace (`.session`,
-`.probe`). A subscriber selects the
-shape of the probe through the track name: target bitrate, duration or
+This document defines probe tracks for Media over QUIC Transport (MOQT):
+tracks of synthetic objects, generated on demand, that measure the
+bandwidth of a single hop. Probe tracks live under reserved,
+session-scoped Track Namespaces and are never forwarded or cached. The
+track name selects the shape of the probe: target bitrate, duration or
 size, object rate, object size, group structure and key-object bursts.
-The relay serves the probe on the same session as the subscriber's media
-and never forwards the request upstream. The subscriber can therefore
-measure, on the relay-to-subscriber hop, whether a higher bitrate is
-sustainable before it switches to a higher-quality track. The same
-mechanism works in the other direction: a publisher can publish a probe
-track to a relay under the session-scoped namespace (`.session`,
-`.sink`) to measure the hop from the publisher to the relay.
+For a downlink probe, a subscriber subscribes to a probe track in the
+namespace (`.session`, `.probe`), and the relay generates it, so the
+subscriber can measure whether a higher bitrate is sustainable on the
+relay-to-subscriber hop before it switches to a higher-quality track.
+For an uplink probe, a publisher generates a probe track and publishes
+it to its relay in the namespace (`.session`, `.sink`), to measure the
+publisher-to-relay hop.
 
 --- middle
 
@@ -89,9 +89,11 @@ subscriber:
   timing information that the receiver could use to compute delay
   trends.
 
-This document defines a probe track: a track whose content the relay
-generates on demand, in a shape the subscriber describes in the track
-name. Because the relay generates the data itself, a probe:
+This document defines probe tracks: tracks of synthetic objects,
+generated on demand in a shape described by the track name. In a
+downlink probe, a subscriber requests a probe track and the relay
+generates it. Because the relay generates the data itself, a downlink
+probe:
 
 * exercises exactly the hop that is usually the bottleneck for ABR
   decisions, from the relay to the subscriber, and adds no load upstream;
@@ -110,6 +112,12 @@ name. Because the relay generates the data itself, a probe:
 
 The result of a probe is input to a switching decision, for example one
 made with the mechanism in {{TrackSwitching}}.
+
+Publishers have the mirror-image problem: before choosing the bitrates
+to encode, a publisher needs to know how much it can send to its first
+relay. In an uplink probe, the publisher generates a probe track with
+the same naming and object format and publishes it to the relay, which
+consumes it without forwarding it ({{uplink}}).
 
 ## Terms and Definitions
 
