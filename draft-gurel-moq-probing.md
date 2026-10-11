@@ -132,6 +132,39 @@ subscriber, a switch to another track, for example with the mechanism
 in {{TrackSwitching}}; for a publisher, a change of its encoding
 parameters.
 
+## Relation to MOQT Padding {#padding}
+
+MOQT {{MoQTransport}} already lets an endpoint send padding, on
+unidirectional streams or in datagrams, to probe for additional
+bandwidth at a lower priority than Object data, and notes that
+publishers can use padding to probe without additional subscriptions.
+Padding is started and shaped by its sender, carries no Objects and no
+timing information, and is discarded by the receiver.
+
+For downlink probing, padding does not fit: the subscriber needs the
+measurement, but the relay is the sender. The subscriber cannot request
+padding, choose its rate, shape or duration, or compute delay trends
+from it. Downlink probes fill this gap.
+
+For uplink probing, the publisher is both the sender and the endpoint
+that needs the result, so padding, together with an estimate from the
+publisher's own congestion controller, can be sufficient. Uplink probes
+add the following over padding:
+
+* the relay accepts or refuses the probe before any data arrives;
+
+* the probe has a declared shape that the relay can enforce;
+
+* the probe consists of media-like objects that take the same path
+  through the relay as media; and
+
+* every object carries a send timestamp, so the relay can measure the
+  probe, which pays off once the relay can report its result to the
+  publisher ({{uplink}}).
+
+Whether these additions justify uplink probes is an open question
+({{uplink}}).
+
 ## Terms and Definitions
 
 {::boilerplate bcp14-tagged}
@@ -646,8 +679,9 @@ Video Frame Marking (0x09):
 
 The payload of a probe object takes the place of the LOC Payload, and
 consists of padding: bytes that bring the payload to its resolved size
-(s, or k*s for the first object of a group). The probe sender SHOULD set
-them to zero, and receivers MUST ignore their values. Probe objects
+(s, or k*s for the first object of a group). The probe sender MUST set
+them to zero, consistent with the padding defined in {{MoQTransport}},
+and receivers MUST ignore their values. Probe objects
 carry no LOC Private Properties. Because the payload is not media, a
 receiver MUST NOT pass a probe payload to a media decoder, even if it
 parses probe objects with a LOC parser.
@@ -664,13 +698,6 @@ Probe objects carry no other per-object fields:
   Probe Name that the catalog gives for it ({{catalog}}).
 
 * The end of the probe is signaled by PUBLISH_DONE.
-
-TBD: Whether padding should be zeros or the output of a pseudorandom
-number generator. Zeros are free to produce. MOQT always runs over an
-encrypted QUIC connection, so zero padding looks random on the wire,
-cannot be compressed by the network, and does not weaken QUIC's AEAD
-ciphers, which resist known-plaintext attacks. Only the two endpoints
-see the plaintext, and probe objects are never cached.
 
 # Downlink Probes {#downlink}
 
@@ -826,6 +853,15 @@ The publisher generates the probe and publishes it with PUBLISH in the
 never caches it and never forwards it upstream or to any subscriber,
 including the publisher itself ({{session-ns}}).
 
+A publisher that only needs a sender-side estimate can use MOQT padding
+instead ({{padding}}). Uplink probes are meant for the cases in which
+the relay should approve, bound and measure the probe.
+
+TBD: Whether uplink probes are needed beyond MOQT padding. Their main
+advantage over padding, a measurement made by the relay, depends on a
+way for the relay to report its result ({{uplink-result}}), which is not
+yet specified.
+
 ## Requesting an Uplink Probe
 
 The Track Name of an uplink probe MUST be a Dynamic Probe Name
@@ -887,14 +923,14 @@ established. A SETUP option is likely the better fit, because it tells
 the publisher before it sends any request, and it covers relays that do
 not serve downlink probes.
 
-## Measurement Result
+## Measurement Result {#uplink-result}
 
 The relay receives the probe, but the publisher needs the result. The
 publisher can estimate the uplink capacity on its own side, from the
 delivery rate that its congestion controller observes while it sends
 the probe; a greedy probe is the most suitable shape for this. How much
 of this information is available depends on the publisher's transport
-API.
+API. MOQT padding ({{padding}}) supports the same estimate.
 
 TBD: A way for the relay to report what it measured, for example a
 session-scoped result track, such as (`.session`, `.probe`, `.result`),
@@ -987,9 +1023,6 @@ this document.
 
 Common:
 
-* Whether probe padding should be zeros or pseudorandom bytes (see
-  {{payload}}).
-
 * Whether the probe parameter keys need an IANA registry (see
   {{iana}}).
 
@@ -1015,6 +1048,9 @@ Downlink probes:
   fetched (see {{publisher}}).
 
 Uplink probes:
+
+* Whether uplink probes are needed beyond MOQT padding (see
+  {{uplink}}).
 
 * How a publisher discovers support for uplink probes: a catalog field
   or a SETUP option (see {{uplink-discovery}}).
