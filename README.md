@@ -2,11 +2,10 @@
 
 This is the working area for the Internet-Draft, "Probe Tracks for Bandwidth Estimation in Media over QUIC Transport".
 
-* Editor's Copy: open the latest run of the
-  [Build Draft](https://github.com/moqtail/draft-gurel-moq-probing/actions/workflows/build.yml)
-  workflow and download the `draft` artifact (HTML, TXT and PDF).
+* [Editor's Copy](https://moqtail.github.io/draft-gurel-moq-probing/#go.draft-gurel-moq-probing.html)
 * [Datatracker Page](https://datatracker.ietf.org/doc/draft-gurel-moq-probing)
 * [Working Group Draft](https://datatracker.ietf.org/doc/html/draft-gurel-moq-probing)
+* [Compare Editor's Copy to Working Group Draft](https://moqtail.github.io/draft-gurel-moq-probing/#go.draft-gurel-moq-probing.diff)
 
 ## Command Line Usage
 
